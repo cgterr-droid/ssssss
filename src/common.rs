@@ -1079,7 +1079,7 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    "http://J2A.67324860.CN:25554".to_owned()
+    "http://114.67.168.157:25554".to_owned()
 }
 
 #[inline]
