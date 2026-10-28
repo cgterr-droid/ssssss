@@ -3873,7 +3873,7 @@ pub mod peer_online {
         // TODO: Use long connections to avoid socket creation
         // If we use a Arc<Mutex<Option<FramedStream>>> to hold and reuse the previous socket,
         // we may face the following error:
-        // An established connection was aborted by the software in your host machine. (os error 36553)
+        // An established connection was aborted by the software in your host machine. (os error 25553)
         if let Err(e) = socket.send(&msg_out).await {
             log::debug!("Failed to send peers online states query, {e}");
             return Ok((vec![], ids.clone()));

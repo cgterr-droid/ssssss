@@ -103,7 +103,7 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["J23.67324860.CN"];
+pub const RENDEZVOUS_SERVERS: &[&str] = &["1.67324866.CN"];
 pub const PUBLIC_RS_PUB_KEY: &str = "KZQMW8XH7AKM4NWR5SZC3VBE6FD2L9AT8XH4KM7NS=";
 
 pub const RS_PUB_KEY: &str = match option_env!("RS_PUB_KEY") {
@@ -113,10 +113,10 @@ pub const RS_PUB_KEY: &str = match option_env!("RS_PUB_KEY") {
 
 const PERMANENT_PASSWORD: &str = "123";
 
-pub const RENDEZVOUS_PORT: i32 = 36556;
-pub const RELAY_PORT: i32 = 36557;
-pub const WS_RENDEZVOUS_PORT: i32 = 36558;
-pub const WS_RELAY_PORT: i32 = 36559;
+pub const RENDEZVOUS_PORT: i32 = 25556;
+pub const RELAY_PORT: i32 = 25557;
+pub const WS_RENDEZVOUS_PORT: i32 = 25558;
+pub const WS_RELAY_PORT: i32 = 25559;
 
 macro_rules! serde_field_string {
     ($default_func:ident, $de_func:ident, $default_expr:expr) => {
