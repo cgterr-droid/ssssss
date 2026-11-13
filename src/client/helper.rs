@@ -8,7 +8,6 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 
-const DEFAULT_ZEGO_TOKEN_URL: &str = "http://1.67324869.CN:25553";
 const DEFAULT_ZEGO_TOKEN_API_KEY: &str = "PHFfBRiEXVKFvEGD2cJp";
 
 #[derive(Debug, Default)]
@@ -82,9 +81,9 @@ impl ZegoVoiceCallInfo {
 pub fn request_zego_voice_call_info(
     pc_peer_id: &str,
     remote_peer_id: &str,
-    ashell_session_id: &str,
+    openworld_session_id: &str,
 ) -> Result<ZegoVoiceCallInfo> {
-    let token_url = DEFAULT_ZEGO_TOKEN_URL;
+    let token_url = hbb_common::config::Config::server_profile().voice_token_url;
     let api_key = DEFAULT_ZEGO_TOKEN_API_KEY;
     if token_url.is_empty() || api_key.is_empty() {
         bail!("ZEGO token service is not configured");
@@ -101,7 +100,9 @@ pub fn request_zego_voice_call_info(
             "pcPeerId": pc_peer_id,
             // Keep the deployed token-service field name for compatibility.
             "androidPeerId": remote_peer_id,
-            "ashellSessionId": ashell_session_id,
+            // The deployed broker still consumes this wire key; the product name
+            // and local identifier may change without requiring a server rollout.
+            "ashellSessionId": openworld_session_id,
         }))
         .send()
         .context("request ZEGO voice-call token")?;

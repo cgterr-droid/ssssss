@@ -48,7 +48,7 @@ use hbb_common::{
     bail,
     config::{
         self, keys, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution,
-        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
+        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT,
     },
     fs::JobType,
     futures::future::{select_ok, FutureExt},
@@ -259,27 +259,24 @@ impl Client {
         }
 
         let other_server = interface.get_lch().read().unwrap().other_server.clone();
-        let (peer, other_server, key, token) = if let Some((a, b, c)) = other_server.as_ref() {
-            (a.as_ref(), b.as_ref(), c.as_ref(), "")
-        } else {
-            (peer, "", key, token)
-        };
-        let (mut rendezvous_server, servers, contained) = if other_server.is_empty() {
-            crate::get_rendezvous_server(1_000).await
-        } else {
-            if other_server == PUBLIC_SERVER {
-                (
-                    check_port(RENDEZVOUS_SERVERS[0], RENDEZVOUS_PORT),
-                    RENDEZVOUS_SERVERS[1..]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect(),
-                    true,
-                )
+        if let Some((_, host, _)) = other_server.as_ref() {
+            let requested = if host == PUBLIC_SERVER {
+                hbb_common::server_profiles::selected_profile("pc_1").id_server.to_owned()
             } else {
-                (check_port(other_server, RENDEZVOUS_PORT), Vec::new(), true)
+                check_port(host, RENDEZVOUS_PORT)
+            };
+            if requested != Config::server_profile().id_server {
+                bail!("设备所属服务器与当前配置不一致");
             }
+        }
+        let (peer, token) = if let Some((id, _, _)) = other_server.as_ref() {
+            (id.as_ref(), "")
+        } else {
+            (peer, token)
         };
+        let key = hbb_common::server_profiles::SERVER_PUBLIC_KEY;
+        let (mut rendezvous_server, servers, contained) =
+            crate::get_rendezvous_server(1_000).await;
 
         if !force_relay_requested && crate::get_ipv6_punch_enabled() {
             crate::test_ipv6().await;
@@ -473,14 +470,22 @@ impl Client {
                             }
                         }
                         signed_id_pk = rr.pk().into();
-                        let fut = Self::create_relay(
-                            peer,
-                            rr.uuid,
-                            rr.relay_server,
-                            key,
-                            conn_type,
-                            my_addr.is_ipv4(),
-                        );
+                        // Both endpoints must join the same relay/UUID. Merely changing
+                        // the controller socket would leave the Android on the old relay.
+                        let desired_relay = Config::server_profile().relay_server.to_owned();
+                        let reuse_relay = desired_relay == rr.relay_server;
+                        let relay_uuid = rr.uuid;
+                        let secure = !signed_id_pk.is_empty();
+                        // Own the relay attempt's inputs; keep the original ID server for the result.
+                        let relay_rendezvous = rendezvous_server.clone();
+                        let fut = async move {
+                            if reuse_relay {
+                                Self::create_relay(peer, relay_uuid, desired_relay, key, conn_type, my_addr.is_ipv4()).await
+                            } else {
+                                Self::request_relay(peer, desired_relay, &relay_rendezvous,
+                                    secure, key, token, conn_type).await
+                            }
+                        };
                         connect_futures.push(
                             async move {
                                 let conn = fut.await?;
@@ -570,6 +575,7 @@ impl Client {
         udp_socket_nat: Option<Arc<UdpSocket>>,
         udp_socket_v6: Option<Arc<UdpSocket>>,
     ) -> ResultType<(Stream, bool, Option<Vec<u8>>, Option<KcpStream>)> {
+        let relay_server = Config::server_profile().relay_server;
         if interface.is_force_relay() {
             if relay_server.is_empty() {
                 bail!("Relay-only mode requires a relay server");
@@ -1787,8 +1793,8 @@ impl LoginConfigHandler {
         self.session_id = sid;
         self.supported_encoding = Default::default();
         self.restarting_remote_device = false;
-        let ashell_force_relay = true;
-        self.force_relay = ashell_force_relay
+        let openworld_force_relay = true;
+        self.force_relay = openworld_force_relay
             || config::option2bool("force-always-relay", &self.get_option("force-always-relay"))
             || force_relay;
         if let Some((real_id, server, key)) = &self.other_server {
@@ -2045,8 +2051,8 @@ impl LoginConfigHandler {
             option.block_input = BoolOption::No.into();
         } else if name == "show-quality-monitor" {
             config.show_quality_monitor.v = !config.show_quality_monitor.v;
-        } else if name == "show-ashell-status-monitor" {
-            config.show_ashell_status_monitor.v = !config.show_ashell_status_monitor.v;
+        } else if name == "show-openworld-status-monitor" {
+            config.show_openworld_status_monitor.v = !config.show_openworld_status_monitor.v;
         } else if name == "allow_swap_key" {
             config.allow_swap_key.v = !config.allow_swap_key.v;
         } else if name == "view-only" {
@@ -2243,8 +2249,8 @@ impl LoginConfigHandler {
             self.config.disable_clipboard.v
         } else if name == "show-quality-monitor" {
             self.config.show_quality_monitor.v
-        } else if name == "show-ashell-status-monitor" {
-            self.config.show_ashell_status_monitor.v
+        } else if name == "show-openworld-status-monitor" {
+            self.config.show_openworld_status_monitor.v
         } else if name == "allow_swap_key" {
             self.config.allow_swap_key.v
         } else if name == "view-only" {
@@ -2578,6 +2584,7 @@ impl LoginConfigHandler {
             Bytes::new()
         };
         let mut lr = LoginRequest {
+            developer_mode: self.conn_type == ConnType::DEFAULT_CONN && crate::developer_mode::enabled(),
             username: pure_id,
             password: password.into(),
             my_id,
@@ -3808,7 +3815,7 @@ async fn hc_connection_(
 
 pub mod peer_online {
     use hbb_common::{
-        anyhow::bail,
+        anyhow::{anyhow, bail},
         config::{Config, CONNECT_TIMEOUT, READ_TIMEOUT},
         log,
         rendezvous_proto::*,
@@ -3840,15 +3847,10 @@ pub mod peer_online {
     async fn create_online_stream() -> ResultType<Stream> {
         let (rendezvous_server, _servers, _contained) =
             crate::get_rendezvous_server(READ_TIMEOUT).await;
-        let tmp: Vec<&str> = rendezvous_server.split(":").collect();
-        if tmp.len() != 2 {
-            bail!("Invalid server address: {}", rendezvous_server);
-        }
-        let port: u16 = tmp[1].parse()?;
-        if port == 0 {
-            bail!("Invalid server address: {}", rendezvous_server);
-        }
-        let online_server = format!("{}:{}", tmp[0], port - 1);
+        let (_, port) = hbb_common::socket_client::split_host_port(&rendezvous_server)
+            .ok_or_else(|| anyhow!("Invalid configured ID server"))?;
+        if port <= 1 { bail!("Invalid configured ID server port"); }
+        let online_server = crate::increase_port(&rendezvous_server, -1);
         connect_tcp(online_server, CONNECT_TIMEOUT).await
     }
 
@@ -3873,7 +3875,7 @@ pub mod peer_online {
         // TODO: Use long connections to avoid socket creation
         // If we use a Arc<Mutex<Option<FramedStream>>> to hold and reuse the previous socket,
         // we may face the following error:
-        // An established connection was aborted by the software in your host machine. (os error 25553)
+        // An established connection was aborted by the software in your host machine. (os error 10053)
         if let Err(e) = socket.send(&msg_out).await {
             log::debug!("Failed to send peers online states query, {e}");
             return Ok((vec![], ids.clone()));

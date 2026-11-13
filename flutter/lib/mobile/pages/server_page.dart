@@ -266,8 +266,6 @@ class ServiceNotRunningNotification extends StatelessWidget {
               icon: const Icon(Icons.play_arrow),
               onPressed: () async {
                 serverModel.toggleService();
-                await bind.mainSetOption(
-                    key: 'relay-server', value: '1.67324869.CN:25557');
               },
               label: Text(translate("Start service")),
             ),
@@ -1233,7 +1231,7 @@ class _EnhancementsSectionState extends State<EnhancementsSection>
             SwitchListTile(
               visualDensity: VisualDensity.compact,
               contentPadding: EdgeInsets.all(0),
-              title: Text(translate('Keep A Shell You background service')),
+              title: Text(translate('Keep OpenWorld background service')),
               subtitle: Text('* ${translate('Ignore Battery Optimizations')}'),
               value: _ignoreBatteryOpt,
               onChanged: (value) async {

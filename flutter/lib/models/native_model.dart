@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../common.dart';
 import '../generated_bridge.dart';
+import '../utils/server_profile_state.dart';
 
 final class RgbaFrame extends Struct {
   @Uint32()
@@ -45,6 +46,14 @@ class PlatformFFI {
 
   RustdeskImpl get ffiBind => _ffiBind;
   F3? _session_get_rgba;
+  void Function()? _enableDeveloperMode;
+
+  bool enableDeveloperMode() {
+    final enable = _enableDeveloperMode;
+    if (enable == null) return false;
+    enable();
+    return true;
+  }
 
   static get localeName => Platform.localeName;
 
@@ -127,21 +136,28 @@ class PlatformFFI {
   Future<void> init(String appType) async {
     _appType = appType;
     final dylib = isAndroid
-        ? DynamicLibrary.open('libashell.so')
+        ? DynamicLibrary.open('libopenworld.so')
         : isLinux
-            ? DynamicLibrary.open('libashell.so')
+            ? DynamicLibrary.open('libopenworld.so')
             : isWindows
-                ? DynamicLibrary.open('ashell.dll')
+                ? DynamicLibrary.open('openworld.dll')
                 :
                 // Use executable itself as the dynamic library for MacOS.
                 // Multiple dylib instances will cause some global instances to be invalid.
                 // eg. `lazy_static` objects in rust side, will be created more than once, which is not expected.
                 //
-                // isMacOS? DynamicLibrary.open("libashell.dylib") :
+                // isMacOS? DynamicLibrary.open("libopenworld.dylib") :
                 DynamicLibrary.process();
     debugPrint('initializing FFI $_appType');
     try {
       _session_get_rgba = dylib.lookupFunction<F3Dart, F3>("session_get_rgba");
+      try {
+        _enableDeveloperMode = dylib.lookupFunction<Void Function(), void Function()>(
+            'openworld_enable_developer_mode');
+      } catch (_) {
+        // A mismatched native library cannot enable developer session priority.
+        _enableDeveloperMode = null;
+      }
       _setLoginUsername = dylib
           .lookup<NativeFunction<set_login_username_func>>('set_login_username')
           .asFunction();
@@ -225,6 +241,8 @@ class PlatformFFI {
         appDir: _dir,
         customClientConfig: '',
       );
+      ServerProfileState.markApplied(
+          _ffiBind.mainGetOptionSync(key: 'server-profile-revision'));
     } catch (e) {
       debugPrintStack(label: 'initialize failed: $e');
     }

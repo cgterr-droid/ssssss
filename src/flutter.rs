@@ -99,11 +99,11 @@ fn load_plugin_in_app_path(dll_name: &str) -> Result<Library, LibError> {
     }
 }
 
-/// FFI for AShell core's main entry.
+/// FFI for OpenWorld core's main entry.
 /// Return true if the app should continue running with UI(possibly Flutter), false if the app should exit.
 #[cfg(not(windows))]
 #[no_mangle]
-pub extern "C" fn ashell_core_main() -> bool {
+pub extern "C" fn openworld_core_main() -> bool {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if crate::core_main::core_main().is_some() {
         return true;
@@ -122,7 +122,7 @@ pub extern "C" fn handle_applicationShouldOpenUntitledFile() {
 
 #[cfg(windows)]
 #[no_mangle]
-pub extern "C" fn ashell_core_main_args(args_len: *mut c_int) -> *mut *mut c_char {
+pub extern "C" fn openworld_core_main_args(args_len: *mut c_int) -> *mut *mut c_char {
     unsafe { std::ptr::write(args_len, 0) };
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn free_c_args(ptr: *mut *mut c_char, len: c_int) {
 
 #[cfg(windows)]
 #[no_mangle]
-pub unsafe extern "C" fn get_ashell_app_name(buffer: *mut u16, length: i32) -> i32 {
+pub unsafe extern "C" fn get_openworld_app_name(buffer: *mut u16, length: i32) -> i32 {
     let name = crate::platform::wide_string(&crate::common::get_display_app_name());
     if length > name.len() as i32 {
         std::ptr::copy_nonoverlapping(name.as_ptr(), buffer, name.len());
@@ -218,6 +218,7 @@ pub struct FlutterHandler {
     session_handlers: Arc<RwLock<HashMap<SessionID, SessionHandler>>>,
     display_rgbas: Arc<RwLock<HashMap<usize, RgbaData>>>,
     peer_info: Arc<RwLock<PeerInfo>>,
+    screen_access: Arc<RwLock<Option<(bool, bool, bool)>>>,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     hooks: Arc<RwLock<HashMap<String, SessionHook>>>,
     use_texture_render: Arc<AtomicBool>,
@@ -229,6 +230,7 @@ impl Default for FlutterHandler {
             session_handlers: Default::default(),
             display_rgbas: Default::default(),
             peer_info: Default::default(),
+            screen_access: Default::default(),
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             hooks: Default::default(),
             use_texture_render: Arc::new(
@@ -716,8 +718,25 @@ impl InvokeUiSession for FlutterHandler {
         );
     }
 
-    fn update_ashell_status(&self, json: String) {
-        self.push_event("update_ashell_status", &[("status", &json)], &[]);
+    fn update_openworld_status(&self, json: String) {
+        self.push_event("update_openworld_status", &[("status", &json)], &[]);
+    }
+
+    fn update_screen_access(&self, paused: bool, supported: bool, developer: bool) {
+        let mut access = self.screen_access.write().unwrap();
+        let resumed = access.as_ref().map(|a| a.0 && !paused).unwrap_or(false);
+        *access = Some((paused, supported, developer));
+        if resumed {
+            // Texture renderers normally emit only their first frame/type change.
+            // Re-arm that notification so Dart can remove the resume placeholder.
+            for session in self.session_handlers.read().unwrap().values() {
+                session.renderer.reset_all_display_render_type();
+            }
+        }
+        self.push_event("screen_access", &[
+            ("paused", &paused.to_string()), ("supported", &supported.to_string()),
+            ("developer", &developer.to_string()),
+        ], &[]);
     }
 
     fn set_connection_type(&self, is_secured: bool, direct: bool) {
@@ -1294,6 +1313,8 @@ pub fn session_add(
     is_shared_password: bool,
     conn_token: Option<String>,
 ) -> ResultType<FlutterSession> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let _profile_guard = crate::server_profile::CHANGE_LOCK.lock().unwrap();
     let conn_type = if is_file_transfer {
         ConnType::FILE_TRANSFER
     } else if is_view_camera {
@@ -1395,6 +1416,17 @@ pub fn session_start_(
 
     if let Some(session) = sessions::get_session_by_session_id(session_id) {
         let is_first_ui_session = session.session_handlers.read().unwrap().len() == 1;
+        if is_connected || !is_first_ui_session {
+            // Keep the read guard until delivery: a tab move must not overwrite or
+            // replay an older snapshot after the network thread changes policy.
+            let access = session.screen_access.read().unwrap();
+            if let Some((paused, supported, developer)) = *access {
+                session.push_event_to("screen_access", &[
+                    ("paused", &paused.to_string()), ("supported", &supported.to_string()),
+                    ("developer", &developer.to_string()),
+                ], &[session_id]);
+            }
+        }
         if !is_connected && is_first_ui_session {
             log::info!(
                 "Session {} start, use texture render: {}",
@@ -2321,7 +2353,12 @@ pub(super) mod async_tasks {
         loop {
             match rx_onlines.recv() {
                 Ok(ids) => {
-                    crate::client::peer_online::query_online_states(ids, handle_query_onlines).await
+                    let revision = hbb_common::config::Config::server_profile_revision();
+                    crate::client::peer_online::query_online_states(ids, move |onlines, offlines| {
+                        if revision == hbb_common::config::Config::server_profile_revision() {
+                            handle_query_onlines(onlines, offlines, revision);
+                        }
+                    }).await
                 }
                 _ => {
                     // unreachable!
@@ -2341,11 +2378,12 @@ pub(super) mod async_tasks {
         Ok(())
     }
 
-    fn handle_query_onlines(onlines: Vec<String>, offlines: Vec<String>) {
+    fn handle_query_onlines(onlines: Vec<String>, offlines: Vec<String>, revision: u64) {
         let data = HashMap::from([
             ("name", "callback_query_onlines".to_owned()),
             ("onlines", onlines.join(",")),
             ("offlines", offlines.join(",")),
+            ("server_profile_revision", revision.to_string()),
         ]);
         let _res = super::push_global_event(
             super::APP_TYPE_MAIN,

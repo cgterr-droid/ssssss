@@ -51,7 +51,7 @@ pub enum GrabState {
 pub type NotifyMessageBox = fn(String, String, String, String) -> dyn Future<Output = ()>;
 
 // the executable name of the portable version
-pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "ASHELL_APPNAME";
+pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "OPENWORLD_APPNAME";
 
 pub const PLATFORM_WINDOWS: &str = "Windows";
 pub const PLATFORM_LINUX: &str = "Linux";
@@ -660,44 +660,10 @@ async fn test_nat_type_() -> ResultType<bool> {
     Ok(ok)
 }
 
-pub async fn get_rendezvous_server(ms_timeout: u64) -> (String, Vec<String>, bool) {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let (mut a, mut b) = get_rendezvous_server_(ms_timeout);
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let (mut a, mut b) = get_rendezvous_server_(ms_timeout).await;
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::get_license_from_exe_name() {
-        if !lic.host.is_empty() {
-            a = lic.host;
-        }
-    }
-    let mut b: Vec<String> = b
-        .drain(..)
-        .map(|x| socket_client::check_port(x, config::RENDEZVOUS_PORT))
-        .collect();
-    let c = if b.contains(&a) {
-        b = b.drain(..).filter(|x| x != &a).collect();
-        true
-    } else {
-        a = b.pop().unwrap_or(a);
-        false
-    };
-    (a, b, c)
-}
-
-#[inline]
-#[cfg(any(target_os = "android", target_os = "ios"))]
-fn get_rendezvous_server_(_ms_timeout: u64) -> (String, Vec<String>) {
-    (
-        Config::get_rendezvous_server(),
-        Config::get_rendezvous_servers(),
-    )
-}
-
-#[inline]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-async fn get_rendezvous_server_(ms_timeout: u64) -> (String, Vec<String>) {
-    crate::ipc::get_rendezvous_server(ms_timeout).await
+pub async fn get_rendezvous_server(_ms_timeout: u64) -> (String, Vec<String>, bool) {
+    // The profile ID is synchronized through IPC, never the endpoint itself.
+    // Do not let an old service reply or executable filename override it.
+    (Config::get_rendezvous_server(), Vec::new(), true)
 }
 
 #[inline]
@@ -989,8 +955,8 @@ pub fn get_app_name() -> String {
 /// Presentation name; filesystem, service and URI identities stay space-free.
 pub fn get_display_app_name() -> String {
     let name = get_app_name();
-    if name == "AShell" {
-        "一个壳子".to_owned()
+    if name == "OpenWorld" {
+        "开放世界".to_owned()
     } else {
         name
     }
@@ -998,7 +964,7 @@ pub fn get_display_app_name() -> String {
 
 #[inline]
 pub fn is_rustdesk() -> bool {
-    hbb_common::config::APP_NAME.read().unwrap().eq("AShell")
+    hbb_common::config::APP_NAME.read().unwrap().eq("OpenWorld")
 }
 
 #[inline]
@@ -1008,8 +974,8 @@ pub fn get_uri_prefix() -> String {
 
 #[cfg(target_os = "macos")]
 pub fn get_full_name() -> String {
-    if get_app_name() == "AShell" {
-        return "me.ashell".to_owned();
+    if get_app_name() == "OpenWorld" {
+        return "com.openworld.me".to_owned();
     }
     format!(
         "{}.{}",
@@ -1023,19 +989,8 @@ pub fn is_setup(name: &str) -> bool {
 }
 
 pub fn get_custom_rendezvous_server(custom: String) -> String {
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
-        if !lic.host.is_empty() {
-            return lic.host.clone();
-        }
-    }
-    if !custom.is_empty() {
-        return custom;
-    }
-    if !config::PROD_RENDEZVOUS_SERVER.read().unwrap().is_empty() {
-        return config::PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
-    }
-    "".to_owned()
+    let _ = custom;
+    Config::server_profile().id_server.to_owned()
 }
 
 #[inline]
@@ -1047,44 +1002,18 @@ pub fn get_api_server(api: String, custom: String) -> String {
     if res.ends_with('/') {
         res.pop();
     }
-    if res.starts_with("https")
-        && res.ends_with(":21114")
-        && get_builtin_option(keys::OPTION_ALLOW_HTTPS_21114) != "Y"
-    {
-        return res.replace(":21114", "");
-    }
     res
 }
 
 fn get_api_server_(api: String, custom: String) -> String {
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
-        if !lic.api.is_empty() {
-            return lic.api.clone();
-        }
-    }
-    if !api.is_empty() {
-        return api.to_owned();
-    }
-    let api = option_env!("API_SERVER").unwrap_or_default();
-    if !api.is_empty() {
-        return api.into();
-    }
-    let s0 = get_custom_rendezvous_server(custom);
-    if !s0.is_empty() {
-        let s = crate::increase_port(&s0, -2);
-        if s == s0 {
-            return format!("http://{}:{}", s, config::RENDEZVOUS_PORT - 2);
-        } else {
-            return format!("http://{}", s);
-        }
-    }
-    "http://1.67324869.CN:25554".to_owned()
+    let _ = (api, custom);
+    Config::server_profile().api_server.to_owned()
 }
 
 #[inline]
 pub fn is_public(url: &str) -> bool {
-    url.contains("ashell.")
+    // Keep classification of existing deployments while accepting the new brand.
+    url.contains("openworld.") || url.contains("ashell.")
 }
 
 pub fn get_udp_punch_enabled() -> bool {
@@ -1325,25 +1254,8 @@ pub fn decode64<T: AsRef<[u8]>>(input: T) -> Result<Vec<u8>, base64::DecodeError
 }
 
 pub async fn get_key(sync: bool) -> String {
-    #[cfg(windows)]
-    if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
-        if !lic.key.is_empty() {
-            return lic.key;
-        }
-    }
-    #[cfg(target_os = "ios")]
-    let mut key = Config::get_option("key");
-    #[cfg(not(target_os = "ios"))]
-    let mut key = if sync {
-        Config::get_option("key")
-    } else {
-        let mut options = crate::ipc::get_options_async().await;
-        options.remove("key").unwrap_or_default()
-    };
-    if key.is_empty() {
-        key = config::RS_PUB_KEY.to_owned();
-    }
-    key
+    let _ = sync;
+    hbb_common::server_profiles::SERVER_PUBLIC_KEY.to_owned()
 }
 
 pub fn pk_to_fingerprint(pk: Vec<u8>) -> String {
@@ -1544,8 +1456,8 @@ pub fn create_symmetric_key_msg(their_pk_b: [u8; 32]) -> (Bytes, Bytes, secretbo
 
 #[inline]
 pub fn using_public_server() -> bool {
-    option_env!("RENDEZVOUS_SERVER").unwrap_or("").is_empty()
-        && crate::get_custom_rendezvous_server(get_option("custom-rendezvous-server")).is_empty()
+    // This product always uses an explicitly configured deployment.
+    false
 }
 
 pub struct ThrottledInterval {

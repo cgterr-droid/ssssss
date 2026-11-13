@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../utils/server_profile_state.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -133,6 +134,9 @@ class FfiModel with ChangeNotifier {
   RxBool waitForImageDialogShow = true.obs;
   Timer? waitForImageTimer;
   RxBool waitForFirstImage = true.obs;
+  final screenPausedByDeveloper = false.obs;
+  final screenResumePending = false.obs;
+  final developerPriorityUnsupported = false.obs;
   bool isRefreshing = false;
 
   // Presentation-only connection hint; real frames clear it without changing capture.
@@ -221,12 +225,13 @@ class FfiModel with ChangeNotifier {
   }
 
   void _requestAndroidVideoRefresh({int delayMSecs = 0}) {
-    if (!isPeerAndroid || _pi.displays.isEmpty) {
+    if (screenPausedByDeveloper.isTrue || !isPeerAndroid || _pi.displays.isEmpty) {
       return;
     }
     Timer(Duration(milliseconds: delayMSecs), () {
       final target = parent.target;
       if (!isPeerAndroid ||
+          screenPausedByDeveloper.isTrue ||
           target == null ||
           target.closed ||
           target.connType != ConnType.defaultConn ||
@@ -331,7 +336,7 @@ class FfiModel with ChangeNotifier {
     }
   }
 
-  bool get viewOnly => _viewOnly;
+  bool get viewOnly => _viewOnly || screenPausedByDeveloper.isTrue;
 
   set inputBlocked(v) {
     _inputBlocked = v;
@@ -390,9 +395,12 @@ class FfiModel with ChangeNotifier {
     notifyListeners();
   }
 
-  bool get keyboard => _permissions['keyboard'] != false;
+  bool get keyboard => _permissions['keyboard'] != false && screenPausedByDeveloper.isFalse;
 
   clear() {
+    screenPausedByDeveloper.value = false;
+    screenResumePending.value = false;
+    developerPriorityUnsupported.value = false;
     resetAndroidFrameWait();
     _pi = PeerInfo();
     _secure = null;
@@ -525,8 +533,26 @@ class FfiModel with ChangeNotifier {
         parent.target?.serverModel.onClientRemove(evt);
       } else if (name == 'update_quality_status') {
         parent.target?.qualityMonitorModel.updateQualityStatus(evt);
-      } else if (name == 'update_ashell_status') {
-        parent.target?.ashellStatusModel.updateFromEvent(evt);
+      } else if (name == 'update_openworld_status') {
+        parent.target?.openworldStatusModel.updateFromEvent(evt);
+      } else if (name == 'screen_access') {
+        final paused = evt['paused'] == 'true';
+        final wasPaused = screenPausedByDeveloper.value;
+        screenPausedByDeveloper.value = paused;
+        developerPriorityUnsupported.value = isPeerAndroid &&
+            evt['developer'] == 'true' && evt['supported'] != 'true';
+        if (paused) {
+          screenResumePending.value = true;
+          waitForImageTimer?.cancel();
+          waitForImageTimer = null;
+          androidConnectedWaitingForImage.value = false;
+          waitForImageDialogShow.value = false;
+          parent.target?.dialogManager.dismissByTag('$sessionId-waiting-for-image');
+        } else if (wasPaused) {
+          androidConnectedWaitingForImage.value = true;
+          _requestAndroidVideoRefresh();
+        }
+        notifyListeners();
       } else if (name == 'update_block_input_state') {
         updateBlockInputState(evt, peerId);
       } else if (name == 'update_privacy_mode') {
@@ -1149,7 +1175,7 @@ class FfiModel with ChangeNotifier {
     bind.sessionReconnect(sessionId: sessionId, forceRelay: effectiveForceRelay);
     if (!isPeerAndroid) {
       clearPermissions();
-      parent.target?.ashellStatusModel.reset();
+      parent.target?.openworldStatusModel.reset();
     }
     _stopAndroidAutoReconnect();
     if (isPeerAndroid) {
@@ -1210,7 +1236,7 @@ class FfiModel with ChangeNotifier {
       closeConnection();
     }
 
-    if (waitForFirstImage.isFalse) return;
+    if (screenPausedByDeveloper.isTrue || waitForFirstImage.isFalse) return;
     if (isPeerAndroid) {
       dialogManager.dismissAll();
       if (usesInlineAndroidFrameWait) {
@@ -1691,7 +1717,7 @@ class FfiModel with ChangeNotifier {
     }
 
     if (updateData.isEmpty) {
-      _pi.platformAdditions.remove(kPlatformAdditionsAShellVirtualDisplays);
+      _pi.platformAdditions.remove(kPlatformAdditionsOpenWorldVirtualDisplays);
       _pi.platformAdditions.remove(kPlatformAdditionsAmyuniVirtualDisplays);
     } else {
       try {
@@ -1700,9 +1726,9 @@ class FfiModel with ChangeNotifier {
           _pi.platformAdditions[key] = updateJson[key];
         }
         if (!updateJson
-            .containsKey(kPlatformAdditionsAShellVirtualDisplays)) {
+            .containsKey(kPlatformAdditionsOpenWorldVirtualDisplays)) {
           _pi.platformAdditions
-              .remove(kPlatformAdditionsAShellVirtualDisplays);
+              .remove(kPlatformAdditionsOpenWorldVirtualDisplays);
         }
         if (!updateJson.containsKey(kPlatformAdditionsAmyuniVirtualDisplays)) {
           _pi.platformAdditions.remove(kPlatformAdditionsAmyuniVirtualDisplays);
@@ -3150,7 +3176,7 @@ class QualityMonitorModel with ChangeNotifier {
   }
 }
 
-class AShellStatusData {
+class OpenWorldStatusData {
   bool? video;
   bool? screenshot;
   bool? share;
@@ -3161,18 +3187,18 @@ class AShellStatusData {
   bool? accessibility;
 }
 
-class AShellStatusModel with ChangeNotifier {
+class OpenWorldStatusModel with ChangeNotifier {
   WeakReference<FFI> parent;
-  AShellStatusModel(this.parent);
+  OpenWorldStatusModel(this.parent);
 
   var _show = true;
-  final _data = AShellStatusData();
+  final _data = OpenWorldStatusData();
   static const Duration _staleThreshold = Duration(seconds: 8);
   DateTime? _lastUpdateTime;
   Timer? _staleTimer;
 
   bool get show => _show;
-  AShellStatusData get data => _data;
+  OpenWorldStatusData get data => _data;
 
   Duration? get sinceLastUpdate {
     final t = _lastUpdateTime;
@@ -3185,17 +3211,17 @@ class AShellStatusModel with ChangeNotifier {
     return since != null && since > _staleThreshold;
   }
 
-  Future<void> checkShowAShellStatusMonitor(SessionID sessionId) async {
+  Future<void> checkShowOpenWorldStatusMonitor(SessionID sessionId) async {
     try {
       final raw = await bind.sessionGetToggleOption(
-          sessionId: sessionId, arg: 'show-ashell-status-monitor');
+          sessionId: sessionId, arg: 'show-openworld-status-monitor');
       final show = raw ?? true;
       if (_show != show) {
         _show = show;
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('checkShowAShellStatusMonitor failed: $e');
+      debugPrint('checkShowOpenWorldStatusMonitor failed: $e');
     }
   }
 
@@ -3256,7 +3282,7 @@ class AShellStatusModel with ChangeNotifier {
       _restartStaleTimer();
       if (changed) notifyListeners();
     } catch (e) {
-      debugPrint('updateAShellStatus parse failed: $e');
+      debugPrint('updateOpenWorldStatus parse failed: $e');
     }
   }
 
@@ -3266,7 +3292,7 @@ class AShellStatusModel with ChangeNotifier {
         Timer(_staleThreshold + const Duration(milliseconds: 500), () {
       if (isStale) {
         debugPrint(
-            'AShellStatusModel: stale (>${_staleThreshold.inSeconds}s no update), mark status waiting');
+            'OpenWorldStatusModel: stale (>${_staleThreshold.inSeconds}s no update), mark status waiting');
         _clearStatusFields();
         _lastUpdateTime = null;
         _staleTimer?.cancel();
@@ -3361,7 +3387,7 @@ class FFI {
   late final UserModel userModel; // global
   late final PeerTabModel peerTabModel; // global
   late final QualityMonitorModel qualityMonitorModel; // session
-  late final AShellStatusModel ashellStatusModel; // session
+  late final OpenWorldStatusModel openworldStatusModel; // session
   late final RecordingModel recordingModel; // session
   late final InputModel inputModel; // session
   late final ElevationModel elevationModel; // session
@@ -3392,7 +3418,7 @@ class FFI {
     abModel = AbModel(WeakReference(this));
     groupModel = GroupModel(WeakReference(this));
     qualityMonitorModel = QualityMonitorModel(WeakReference(this));
-    ashellStatusModel = AShellStatusModel(WeakReference(this));
+    openworldStatusModel = OpenWorldStatusModel(WeakReference(this));
     recordingModel = RecordingModel(WeakReference(this));
     inputModel = InputModel(WeakReference(this));
     elevationModel = ElevationModel(WeakReference(this));
@@ -3414,7 +3440,7 @@ class FFI {
     if (_lastSessionPassword.isNotEmpty) {
       return _lastSessionPassword;
     }
-    final cached = _androidSessionPasswordCache[id];
+    final cached = _androidSessionPasswordCache[ServerProfileState.cacheKey(id)];
     if ((cached ?? '').isNotEmpty) {
       _lastSessionPassword = cached!;
       return cached;
@@ -3433,7 +3459,7 @@ class FFI {
     }
     _lastSessionPassword = password;
     if (peerId.isNotEmpty) {
-      _androidSessionPasswordCache[peerId] = password;
+      _androidSessionPasswordCache[ServerProfileState.cacheKey(peerId)] = password;
     }
   }
 
@@ -3445,7 +3471,7 @@ class FFI {
     _lastSessionOsUsername = osUsername;
     _lastSessionOsPassword = osPassword;
     if (peerId.isNotEmpty) {
-      _androidSessionOsPasswordCache[peerId] =
+      _androidSessionOsPasswordCache[ServerProfileState.cacheKey(peerId)] =
           Tuple2(osUsername, osPassword);
     }
   }
@@ -3454,7 +3480,7 @@ class FFI {
     if (_lastSessionOsUsername.isNotEmpty || _lastSessionOsPassword.isNotEmpty) {
       return;
     }
-    final cached = _androidSessionOsPasswordCache[id];
+    final cached = _androidSessionOsPasswordCache[ServerProfileState.cacheKey(id)];
     if (cached == null) {
       return;
     }
@@ -3675,6 +3701,8 @@ class FFI {
   }
 
   void onEvent2UIRgba() async {
+    if (ffiModel.screenPausedByDeveloper.isTrue) return;
+    ffiModel.screenResumePending.value = false;
     ffiModel.resetAndroidFrameWait();
     ffiModel.waitForImageTimer?.cancel();
     ffiModel.waitForImageTimer = null;
@@ -3742,7 +3770,7 @@ class FFI {
     await imageModel.update(null);
     cursorModel.clear();
     ffiModel.clear();
-    ashellStatusModel.reset();
+    openworldStatusModel.reset();
     canvasModel.clear();
     inputModel.resetModifiers();
     if (closeSession) {
@@ -3868,8 +3896,8 @@ class PeerInfo with ChangeNotifier {
   bool get isInstalled =>
       platform != kPeerPlatformWindows ||
       platformAdditions[kPlatformAdditionsIsInstalled] == true;
-  List<int> get AShellVirtualDisplays => List<int>.from(
-      platformAdditions[kPlatformAdditionsAShellVirtualDisplays] ?? []);
+  List<int> get OpenWorldVirtualDisplays => List<int>.from(
+      platformAdditions[kPlatformAdditionsOpenWorldVirtualDisplays] ?? []);
   int get amyuniVirtualDisplayCount =>
       platformAdditions[kPlatformAdditionsAmyuniVirtualDisplays] ?? 0;
 
@@ -3898,7 +3926,7 @@ class PeerInfo with ChangeNotifier {
 
   bool get cursorEmbedded => tryGetDisplay()?.cursorEmbedded ?? false;
 
-  bool get isAShellIdd =>
+  bool get isOpenWorldIdd =>
       platformAdditions[kPlatformAdditionsIddImpl] == 'rustdesk_idd';
   bool get isAmyuniIdd =>
       platformAdditions[kPlatformAdditionsIddImpl] == 'amyuni_idd';

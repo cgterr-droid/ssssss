@@ -1,2 +1,2 @@
-API_SERVER=http://1.67324869.CN:25554
-RENDEZVOUS_SERVER=1.67324869.CN
+# Client server addresses are maintained in libs/hbb_common/src/server_profiles.rs.
+# Kept as the build.cmd compatibility input; no endpoint overrides are defined here.
