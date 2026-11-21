@@ -22,7 +22,7 @@ class RemoteAdbController extends ChangeNotifier {
   bool stale = true;
   bool _disposed = false;
   bool _hasResult = false;
-  String message = '正在获取 Android ADB 状态…';
+  String message = '正在读取 ADB 状态…';
   String statusError = '';
   String output = '';
   int _refreshEpoch = 0;
@@ -33,14 +33,16 @@ class RemoteAdbController extends ChangeNotifier {
   bool get paired => state['paired'] == true;
   bool get connected => !stale && state['connected'] == true;
   bool get supported => !stale && state['supported'] == true;
+  bool get activationSupported => state['activationSupported'] == true;
+  bool get reconnecting => !stale && state['activationState'] == 'reconnecting';
   bool controlAllowed = true;
   bool get ready => supported && controlAllowed && !busy;
 
   String get keepAliveSummary {
     if (stale || state['keepAliveSupported'] != true) return '状态未确认';
-    if (state['keepAliveExempt'] == true) return '已豁免电池优化';
-    if (state['keepAliveBusy'] == true) return '正在设置电池优化豁免…';
-    final status = state['keepAliveExempt'] == null ? '状态未确认' : '未豁免电池优化';
+    if (state['keepAliveExempt'] == true) return '已豁免';
+    if (state['keepAliveBusy'] == true) return '正在设置豁免…';
+    final status = state['keepAliveExempt'] == null ? '状态未确认' : '未豁免';
     final error = state['keepAliveError'];
     return error is String && error.isNotEmpty ? '$status：$error' : status;
   }
@@ -55,10 +57,16 @@ class RemoteAdbController extends ChangeNotifier {
     }
     return null;
   }
-  String get summary => stale ? '状态未确认' : connected
-      ? 'ADB 已连接，Shell 已验证' : state['recovering'] == true
-          ? 'ADB 连接中断，正在恢复 Shell' : paired
-          ? 'Android 有配对记录，尚未连接' : 'Android 暂无配对记录';
+  String get summary => stale ? '状态未确认' : activationSupported
+      ? connected ? 'ADB 已激活'
+          : state['activationState'] == 'starting' ? '正在激活 ADB…'
+          : reconnecting ? '正在恢复 ADB…'
+          : state['activationState'] == 'activation_required' ? '服务暂不可用 · 可重新激活'
+          : paired ? '已配对 · 尚未激活' : '尚未配对'
+      : connected
+      ? '已连接 · Shell 已验证' : state['recovering'] == true
+          ? '正在恢复连接…' : paired
+          ? '已配对 · 尚未连接' : '尚未配对';
 
   void _notify() { if (!_disposed) notifyListeners(); }
 
@@ -80,7 +88,7 @@ class RemoteAdbController extends ChangeNotifier {
     final raw = await bind.sessionGetCommon(sessionId: sessionId,
         key: 'remote_adb_request', param: jsonEncode({'method': method, ...args}))
         .timeout(const Duration(seconds: 5));
-    if (raw == null || raw.isEmpty) throw Exception('远程 ADB 不可用，请确认双方安装支持此功能的版本并保持会话连接。');
+    if (raw == null || raw.isEmpty) throw Exception('远程 ADB 不可用，请检查连接及两端版本。');
     final start = Map<String, dynamic>.from(jsonDecode(raw) as Map);
     if (start['ok'] == false) throw Exception(start['message'] ?? 'ADB 请求失败。');
     final id = start['id'] as String?;
@@ -106,7 +114,7 @@ class RemoteAdbController extends ChangeNotifier {
         if (response == null) throw Exception('ADB 请求已失效，请刷新状态。');
         if (response.isNotEmpty) return Map<String, dynamic>.from(jsonDecode(response) as Map);
       }
-      throw Exception('Android 未返回 ADB 状态或结果，结果尚未确认。请保持远控连接并刷新状态；命令不会自动重放。');
+      throw Exception('Android 响应超时，结果未知。请刷新状态；命令不会自动重发。');
     } catch (_) {
       if (!_disposed && operation) {
         try { await _cancelRequest(id); } catch (_) { }
@@ -168,7 +176,7 @@ class RemoteAdbController extends ChangeNotifier {
         throw Exception('Android 返回的 ADB 状态无效，请更新客户端后重试。');
       }
       if (changed && !busy) _hasResult = false;
-      if (!busy && !_hasResult) message = supported ? summary : '远端不支持此无线调试模块（需要 Android 11+）。';
+      if (!busy && !_hasResult) message = supported ? summary : '远端不支持无线配对，需要 Android 11 及以上。';
     } catch (error) {
       if (!_disposed && epoch == _refreshEpoch) {
         stale = true;
@@ -186,7 +194,7 @@ class RemoteAdbController extends ChangeNotifier {
   Future<Map<String, dynamic>?> run(String method, [Map<String, dynamic> args = const {}]) async {
     if (_disposed || busy) return null;
     if (!supported || !controlAllowed) {
-      message = !controlAllowed ? '当前为只读会话，不能操作 ADB。' : '请先刷新并确认 Android ADB 状态。';
+      message = !controlAllowed ? '只读会话，无法操作 ADB。' : '请先刷新 ADB 状态。';
       _notify();
       return null;
     }
@@ -197,7 +205,7 @@ class RemoteAdbController extends ChangeNotifier {
     sessionState?.advanceEpoch();
     final sessionEpoch = sessionState?.epoch;
     bool receivedState = false;
-    message = '请求已发送；所有 PC 共用 Android 的 ADB 状态，命令使用独立通道。';
+    message = '正在处理…';
     if (method == 'shell') output = '';
     _notify();
     try {
@@ -210,17 +218,22 @@ class RemoteAdbController extends ChangeNotifier {
       if (response['ok'] != true) throw Exception(response['message'] ?? 'ADB 操作失败。');
       final result = response['result'];
       switch (method) {
-        case 'pair': message = '配对成功，所有 PC 均可读取这份记录。点击“我已配对，建立连接”验证 Shell。'; break;
-        case 'pairConnect': message = '配对成功，ADB 已连接，Shell 验证通过。所有 PC 共享此状态。'; break;
+        case 'pair': message = activationSupported
+            ? '配对已保存，请点击“激活 ADB”。'
+            : '配对已保存，请点击“连接 ADB”。'; break;
+        case 'pairConnect': message = activationSupported
+            ? '配对成功，ADB 已激活。'
+            : '配对成功，Shell 已验证。'; break;
         case 'discover':
           final ports = result is Map ? result : const {};
-          message = ports['ambiguous'] == true ? '发现多个本机端口，请核对系统显示的端口并手动填写。'
+          message = ports['ambiguous'] == true ? '发现多个端口，请按手机显示手动填写。'
               : (ports['pairPort'] ?? 0) == 0 && (ports['connectPort'] ?? 0) == 0
-                  ? '未发现端口。请开启无线调试并保持配对码窗口打开；也可手动填写。'
-                  : '已扫描 Android 本机端口，已填入下方。端口会随系统配对窗口和无线调试开关变化。';
+                  ? '未发现端口，请保持无线调试和配对码窗口打开，或手动填写。'
+                  : '端口已填入；重新打开无线调试或配对窗口后请再扫描。';
           break;
-        case 'connect': output = result?.toString() ?? ''; message = 'ADB 已连接，Shell 验证成功。'; break;
-        case 'paste': message = '手机已处理粘贴请求；请确认当前输入框中的内容。'; break;
+        case 'connect': output = result?.toString() ?? ''; message = activationSupported
+            ? 'ADB 已激活' : '已连接 · Shell 已验证'; break;
+        case 'paste': message = '文本已发送，请查看手机输入框。'; break;
         case 'accessibilityEnable':
         case 'accessibilityDisable':
         case 'accessibilityPause':
@@ -234,8 +247,9 @@ class RemoteAdbController extends ChangeNotifier {
           message = data['truncated'] == true ? '输出超过 64 KiB，已关闭命令通道；退出码未知。'
               : '命令结束，退出码：${data['exitCode']}。';
           break;
-        case 'revoke': message = '本应用 ADB 身份和记录已撤销，所有 PC 的 ADB 已断开。系统列表旧条目仍需在 Android 无线调试中手动忘记。'; break;
-        case 'disconnect': message = 'ADB 已断开；Android 配对记录仍保留。'; break;
+        case 'revoke': message = '配对已撤销，所有 PC 的 ADB 已停用。手机系统旧记录需手动忘记。'; break;
+        case 'disconnect': message = activationSupported
+            ? 'ADB 已停用，配对保留；下次需再激活。' : 'ADB 已断开，配对记录保留。'; break;
       }
       return result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
     } catch (error) {

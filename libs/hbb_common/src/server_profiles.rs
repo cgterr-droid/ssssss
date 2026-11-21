@@ -11,7 +11,7 @@ pub const PROFILE_OPTION: &str = "server-profile";
 pub const REVISION_OPTION: &str = "server-profile-revision";
 pub const PROFILE_STATE_OPTION: &str = "server-profile-state";
 pub const PROFILE_ERROR_OPTION: &str = "server-profile-error";
-pub const SERVER_PUBLIC_KEY: &str = "KZQMW8XH7AKM4NWR5SZC3VBE6FD2L9AT8XH4KM7NS=";
+pub const SERVER_PUBLIC_KEY: &str = "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
 pub const ENDPOINT_KEYS: &[&str] = &[
     "custom-rendezvous-server", "relay-server", "api-server", "key",
 ];
@@ -30,30 +30,30 @@ pub struct ServerProfile {
 pub const ANDROID: ServerProfile = ServerProfile {
     id: "android",
     name: "Android",
-    id_server: "114.67.167.84:25556",
-    relay_server: "114.67.167.84:25557",
-    api_server: "http://114.67.167.84:25554",
-    voice_token_url: "http://114.67.167.84:25553",
+    id_server: "1.1.1.1:25556",
+    relay_server: "1.1.1.1:25557",
+    api_server: "http://1.1.1.1:25554",
+    voice_token_url: "http://1.1.1.1:25553",
 };
 
 // PC配置1
 pub const PC_1: ServerProfile = ServerProfile {
     id: "pc_1",
     name: "服务器 1",
-    id_server: "1.67324871.cn:25556",
-    relay_server: "1.67324871.cn:25557",
-    api_server: "http://1.67324871.cn:25554",
-    voice_token_url: "http://1.67324871.cn:25553",
+    id_server: "1.1.1.1:25556",
+    relay_server: "1.1.1.1:25557",
+    api_server: "http://1.1.1.1:25554",
+    voice_token_url: "http://1.1.1.1:25553",
 };
 
 // PC配置2
 pub const PC_2: ServerProfile = ServerProfile {
     id: "pc_2",
     name: "服务器 2",
-    id_server: "114.67.167.84:25556",
-    relay_server: "114.67.167.84:25557",
-    api_server: "http://114.67.167.84:25554",
-    voice_token_url: "http://114.67.167.84:25553",
+    id_server: "8.8.8.8:25556",
+    relay_server: "8.8.8.8:25557",
+    api_server: "http://8.8.8.8:25554",
+    voice_token_url: "http://8.8.8.8:25553",
 };
 
 pub const PC_PROFILES: &[ServerProfile] = &[PC_1, PC_2];

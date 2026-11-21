@@ -8,6 +8,9 @@ class LocalAdbStatus {
   final bool paired;
   final int connectPort;
   final String phase;
+  final bool activationSupported;
+  final String activationState;
+  final String activationError;
   final bool keepAliveSupported;
   final bool? keepAliveExempt;
   final bool keepAliveBusy;
@@ -21,6 +24,9 @@ class LocalAdbStatus {
     this.paired = false,
     this.connectPort = 0,
     this.phase = '',
+    this.activationSupported = false,
+    this.activationState = '',
+    this.activationError = '',
     this.keepAliveSupported = false,
     this.keepAliveExempt,
     this.keepAliveBusy = false,
@@ -35,6 +41,9 @@ class LocalAdbStatus {
         paired: value['paired'] == true,
         connectPort: (value['connectPort'] as num?)?.toInt() ?? 0,
         phase: value['phase'] as String? ?? '',
+        activationSupported: value['activationSupported'] == true,
+        activationState: value['activationState'] as String? ?? '',
+        activationError: value['activationError'] as String? ?? '',
         keepAliveSupported: value['keepAliveSupported'] == true,
         keepAliveExempt: value['keepAliveExempt'] as bool?,
         keepAliveBusy: value['keepAliveBusy'] == true,
@@ -42,11 +51,21 @@ class LocalAdbStatus {
       );
 
   String get keepAliveSummary {
-    if (keepAliveExempt == true) return '已豁免电池优化';
-    if (keepAliveBusy) return '正在设置电池优化豁免…';
-    final state = keepAliveExempt == null ? '状态未确认' : '未豁免电池优化';
+    if (keepAliveExempt == true) return '已豁免';
+    if (keepAliveBusy) return '正在设置豁免…';
+    final state = keepAliveExempt == null ? '状态未确认' : '未豁免';
     return keepAliveError.isEmpty ? state : '$state：$keepAliveError';
   }
+
+  String get activationSummary {
+    if (connected) return activationSupported ? 'ADB 已激活' : '已连接 · Shell 已验证';
+    if (activationState == 'starting') return '正在激活 ADB…';
+    if (reconnecting) return '正在恢复 ADB…';
+    if (activationState == 'activation_required') return '服务暂不可用 · 可重新激活';
+    return paired ? '已配对 · 尚未激活' : '尚未配对';
+  }
+
+  bool get reconnecting => activationState == 'reconnecting';
 }
 
 class LocalAdbOutput {
