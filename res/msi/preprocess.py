@@ -151,12 +151,12 @@ def gen_auto_component(app_name, dist_dir):
 
 
 def display_app_name(app_name):
-    return "开放世界" if app_name == "OpenWorld" else app_name
+    return "格屋云1" if app_name == "OpenWorld" else app_name
 
 
 def shortcut_app_name(app_name):
     # Match the EXE installer, startup and uninstall shortcut filenames.
-    return "开放世界" if app_name == "OpenWorld" else app_name
+    return "格屋云1" if app_name == "OpenWorld" else app_name
 
 
 def gen_pre_vars(args, dist_dir):

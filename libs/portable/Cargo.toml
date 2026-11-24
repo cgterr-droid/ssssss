@@ -2,7 +2,7 @@
 name = "openworld-portable-packer"
 version = "2.0.26"
 edition = "2021"
-description = "开放世界 Service"
+description = "格屋云1 Service"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -19,9 +19,9 @@ native-windows-gui = {version = "1.0", default-features = false, features = ["an
 
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2025 OpenWorld contributors. All rights reserved."
-ProductName = "开放世界"
+ProductName = "格屋云1"
 OriginalFilename = "openworld.exe"
-FileDescription = "开放世界 Service"
+FileDescription = "格屋云1 Service"
 #ProductVersion = ""
 
 [target.'cfg(target_os="windows")'.build-dependencies]

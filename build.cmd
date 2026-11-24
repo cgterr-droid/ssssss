@@ -48,7 +48,7 @@ echo ============================================================
 echo OpenWorld PC build script
 echo ============================================================
 echo [INFO] Source root : "%ROOT_FOLDER%"
-echo [INFO] App name    : "开放世界"
+echo [INFO] App name    : "格屋云1"
 echo [INFO] DEVENV   : "%DEVENV%"
 echo [INFO] DEVTOOL  : "%DEVTOOL%"
 echo [INFO] VC vars     : "%VCVARS%"

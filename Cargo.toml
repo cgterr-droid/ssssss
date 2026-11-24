@@ -4,7 +4,7 @@ version = "2.0.26"
 authors = ["OpenWorld contributors"]
 edition = "2021"
 build= "build.rs"
-description = "开放世界 Remote Desktop Service"
+description = "格屋云1 Remote Desktop Service"
 default-run = "openworld"
 rust-version = "1.75"
 
@@ -193,8 +193,8 @@ exclude = ["vdi/host", "examples/custom_plugin"]
 
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2025 OpenWorld contributors. All rights reserved."
-ProductName = "开放世界"
-FileDescription = "开放世界 Remote Desktop Service"
+ProductName = "格屋云1"
+FileDescription = "格屋云1 Remote Desktop Service"
 OriginalFilename = "openworld.exe"
 
 [target.'cfg(target_os="windows")'.build-dependencies]
