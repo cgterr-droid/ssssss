@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACKAGE = "com.openworld.me"
 NATIVE = "openworld"
-DISPLAY = "服梦云1"
+DISPLAY = "梦服云2"
 checks = 0
 
 
