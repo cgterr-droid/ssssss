@@ -956,7 +956,7 @@ pub fn get_app_name() -> String {
 pub fn get_display_app_name() -> String {
     let name = get_app_name();
     if name == "OpenWorld" {
-        "格屋云1".to_owned()
+        "服梦云1".to_owned()
     } else {
         name
     }

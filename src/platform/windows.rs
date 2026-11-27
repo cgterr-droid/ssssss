@@ -1344,7 +1344,7 @@ fn get_after_install(
 fn get_legacy_display_app_name() -> String {
     let name = crate::get_app_name();
     if name == "OpenWorld" {
-        "格屋云1".to_owned()
+        "服梦云1".to_owned()
     } else {
         name
     }

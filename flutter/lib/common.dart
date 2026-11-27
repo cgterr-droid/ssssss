@@ -4079,7 +4079,7 @@ String _appName = '';
 String get appName {
   if (_appName.isEmpty) {
     _appName = bind.mainGetAppNameSync();
-    if (_appName == 'OpenWorld') _appName = '格屋云1';
+    if (_appName == 'OpenWorld') _appName = '服梦云1';
   }
   return _appName;
 }
